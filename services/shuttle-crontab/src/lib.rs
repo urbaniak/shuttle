@@ -5,34 +5,36 @@ use tokio::time::sleep;
 use cron::Schedule;
 use shuttle_runtime::{async_trait, Service};
 
-pub struct CronService<F> {
+pub struct CronJob<F> {
     pub schedule: Schedule,
     pub job: fn() -> F,
 }
-
-impl<F: Future> CronService<F> {
-    async fn start(&self) {
-        while let Some(next_run) = self.schedule.upcoming(Utc).next() {
-            let next_run_in = next_run
-                .signed_duration_since(chrono::offset::Utc::now())
-                .to_std()
-                .unwrap();
-            sleep(next_run_in).await;
-            (self.job)().await;
-        }
-    }
+pub struct CronService<F> {
+    pub jobs: Vec<CronJob<F>>,
+    // pub schedule: Schedule,
+    // pub job: fn() -> F,
 }
 
 #[async_trait]
-impl<F> Service for CronService<F>
-where
-    F: Future + Send + Sync + 'static,
-{
+impl<F: Future<Output = ()> + Send + Sync + 'static> Service for CronService<F> {
     async fn bind(
         mut self,
         _addr: std::net::SocketAddr,
     ) -> Result<(), shuttle_service::error::Error> {
-        self.start().await;
+        for job in self.jobs {
+            tokio::spawn(async move {
+                while let Some(next_run) = job.schedule.upcoming(Utc).next() {
+                    let next_run_in = next_run
+                        .signed_duration_since(chrono::offset::Utc::now())
+                        .to_std()
+                        .unwrap();
+                    sleep(next_run_in).await;
+                    (job.job)().await;
+                }
+            });
+        }
+        // TODO: some kind of infinite loop?
+        sleep(std::time::Duration::from_secs(100)).await;
 
         Ok(())
     }

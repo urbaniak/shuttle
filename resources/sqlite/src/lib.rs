@@ -45,7 +45,7 @@ impl<'a> ResourceBuilder<sqlx::SqlitePool> for SQLite<'a> {
     type Config = Self;
 
     /// The output type used to build this resource later
-    type Output = SQLiteInstance;
+    type Output = shuttle_service::DbOutput;
 
     /// Create a new instance of this resource builder
     fn new() -> Self {
@@ -78,15 +78,20 @@ impl<'a> ResourceBuilder<sqlx::SqlitePool> for SQLite<'a> {
         let storage_path = factory.get_storage_path()?;
         let db_path = storage_path.join(self.db_name);
 
-        Ok(SQLiteInstance { db_path })
+        Ok(shuttle_service::DbOutput::Local(format!(
+            "sqlite://{}",
+            db_path.display().to_string()
+        )))
     }
 
     /// Build this resource from its config output
     async fn build(build_data: &Self::Output) -> Result<sqlx::SqlitePool, shuttle_service::Error> {
-        let db_path = &build_data.db_path.as_path().display();
-        let db_url = &format!("sqlite://{db_path}");
+        let db_url = match build_data {
+            shuttle_service::DbOutput::Local(local_uri) => local_uri.clone(),
+            shuttle_service::DbOutput::Info(info) => panic!("sqlite cannot use Info database type"),
+        };
 
-        let options = SqliteConnectOptions::from_str(db_url)
+        let options = SqliteConnectOptions::from_str(&db_url)
             .unwrap()
             .create_if_missing(true);
 
